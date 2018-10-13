@@ -4,48 +4,43 @@
 
 #define WIFI_SSID "Toolbox"
 #define WIFI_PW "WIFIPASSWORD"
-#define DEBUG
 
 #define COMMAND_PORT 7891
+
+//#define DEBUG_ALL_DATA
+
+enum ReceivingState { waiting, waiting_l1, waiting_l2, receiving_data};
+ReceivingState state = waiting;
 
 WiFiServer server(COMMAND_PORT);
 
 uint16_t receiveLength;
-char receiveBuffer[2048];
+uint8_t receiveBuffer[2048];
+int byteCounter = 0;
 int pixelcount = 60;
 
 Adafruit_NeoPixel pixels = Adafruit_NeoPixel(pixelcount, D5, NEO_GRB + NEO_KHZ800);
 
 void setup(void) {
   // Serial Port
-#ifdef DEBUG
   Serial.begin(9600);
-#endif
 
   // WiFi
-#ifdef DEBUG
   Serial.println("Initializing WiFi");
   Serial.printf("Connecting to \"%s\"\n", WIFI_SSID);
-#endif
   WiFi.mode(WIFI_STA);
   WiFi.hostname("BLNK-CLIENT");
   WiFi.begin(WIFI_SSID, WIFI_PW);
-#ifdef DEBUG
   Serial.println("");
-#endif
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
-#ifdef DEBUG
     Serial.print(".");
-#endif
   }
-#ifdef DEBUG
   Serial.println("");
   Serial.print("Connected to ");
   Serial.println(WIFI_SSID);
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
-#endif
 
   // NeoPixel
   pixels.begin();
@@ -59,21 +54,41 @@ void loop() {
   if (client)
   {
     Serial.println("Client connected");
-    long lastActivity = millis();
     while (client.connected())
     {
-      if (client.available())
+      while (client.available() > 0)
       {
-        Serial.println("Data available");
-        while (client.read() != 0xaf) {}        // Start byte
-        receiveLength = client.read() << 8;     // Length high bye
-        receiveLength |= client.read();         // Length low byte
-        client.readBytes(receiveBuffer, receiveLength);
-        handleMessage();
-        lastActivity = millis();
-      } else if (millis() < lastActivity || millis() > lastActivity + 30000) {
-        Serial.println("Client timeout");
-        client.stop();
+        switch (state) {
+          case waiting:
+            if (client.read() == 0xaf) {
+              state = waiting_l1;
+            }
+            break;
+          case waiting_l1:
+            receiveLength = client.read() << 8;
+            state = waiting_l2;
+            break;
+          case waiting_l2:
+            receiveLength |= client.read();
+            byteCounter = 0;
+            state = receiving_data;
+            break;
+          case receiving_data:
+            receiveBuffer[byteCounter] = client.read();
+            byteCounter++;
+            if (byteCounter >= receiveLength) {
+              #ifdef DEBUG_ALL_DATA
+              Serial.println("Received data packet:");
+              for (int i = 0; i < receiveLength; i++) {
+                Serial.println(receiveBuffer[i], HEX);
+              }
+              Serial.println();
+              #endif
+              handleMessage();
+              state = waiting;
+            }
+            break;
+        }
       }
     }
     Serial.println("Client disconnected");
@@ -81,14 +96,17 @@ void loop() {
 }
 
 void handleMessage() {
-  Serial.println("message:");
-  for (int i = 0; i < receiveLength; i++) {
-    Serial.print(receiveBuffer[i], HEX);
-  }
+  Serial.println("Handling");
   if (receiveBuffer[0] == 1) {
+    // Command 1 = frame
+    Serial.println("Frame packet");
     for (int i = 0; i < receiveLength && i < 3 * pixelcount; i++) {
       pixels.setPixelColor(i, pixels.Color(receiveBuffer[3 * i + 1], receiveBuffer[3 * i + 2], receiveBuffer[3 * i + 3]));
     }
     pixels.show();
+  } else if (receiveBuffer[0] == 0) {
+    // Command 0 = discard
+    Serial.println("Discard Packet");
   }
+  Serial.println("Done");
 }
