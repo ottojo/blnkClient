@@ -79,7 +79,7 @@ void loop() {
             state = receiving_data;
             break;
           case receiving_data:
-            client.readBytes(receiveBuffer, reveiveLength);
+            client.readBytes(receiveBuffer, receiveLength);
 #ifdef DEBUG_ALL_DATA
             Serial.println("Received data packet:");
             for (int i = 0; i < receiveLength; i++) {
