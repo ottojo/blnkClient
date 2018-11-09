@@ -1,5 +1,4 @@
 #include <Adafruit_NeoPixel.h>
-
 #include <ESP8266WiFi.h>
 
 #define WIFI_SSID "Toolbox"
@@ -16,8 +15,7 @@ WiFiServer server(COMMAND_PORT);
 
 uint16_t receiveLength;
 uint8_t receiveBuffer[2048];
-int byteCounter = 0;
-int pixelcount = 60;
+int pixelcount = 41;
 
 Adafruit_NeoPixel pixels = Adafruit_NeoPixel(pixelcount, D5, NEO_GRB + NEO_KHZ800);
 
@@ -44,6 +42,14 @@ void setup(void) {
 
   // NeoPixel
   pixels.begin();
+  for (int i = 0; i < pixelcount; i++) {
+    pixels.setPixelColor(i - 1, pixels.Color(0, 0, 0));
+    pixels.setPixelColor(i, pixels.Color(50, 50, 50));
+    pixels.show();
+    delay(100);
+  }
+  pixels.setPixelColor(pixelcount - 1, 0, 0, 0);
+  pixels.show();
 
   // Server
   server.begin();
@@ -70,23 +76,19 @@ void loop() {
             break;
           case waiting_l2:
             receiveLength |= client.read();
-            byteCounter = 0;
             state = receiving_data;
             break;
           case receiving_data:
-            receiveBuffer[byteCounter] = client.read();
-            byteCounter++;
-            if (byteCounter >= receiveLength) {
-              #ifdef DEBUG_ALL_DATA
-              Serial.println("Received data packet:");
-              for (int i = 0; i < receiveLength; i++) {
-                Serial.println(receiveBuffer[i], HEX);
-              }
-              Serial.println();
-              #endif
-              handleMessage();
-              state = waiting;
+            client.readBytes(receiveBuffer, reveiveLength);
+#ifdef DEBUG_ALL_DATA
+            Serial.println("Received data packet:");
+            for (int i = 0; i < receiveLength; i++) {
+              Serial.println(receiveBuffer[i], HEX);
             }
+            Serial.println();
+#endif
+            handleMessage();
+            state = waiting;
             break;
         }
       }
@@ -97,7 +99,12 @@ void loop() {
 
 void handleMessage() {
   Serial.println("Handling");
-  if (receiveBuffer[0] == 1) {
+  if (receiveBuffer[0] == 2) {
+    // Command 2 = interval
+    Serial.println("Interval packet");
+
+    pixels.show();
+  } else if (receiveBuffer[0] == 1) {
     // Command 1 = frame
     Serial.println("Frame packet");
     for (int i = 0; i < receiveLength && i < 3 * pixelcount; i++) {
