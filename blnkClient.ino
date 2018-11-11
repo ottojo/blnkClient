@@ -1,25 +1,32 @@
 #include <Adafruit_NeoPixel.h>
 #include <ESP8266WiFi.h>
+#include <WiFiUdp.h>
 
 #define WIFI_SSID "Toolbox"
 #define WIFI_PW "WIFIPASSWORD"
 
 #define COMMAND_PORT 7891
 
+#define ID "test1"
+
 //#define DEBUG_ALL_DATA
+//#define DEBUG
 
 enum ReceivingState { waiting, waiting_l1, waiting_l2, receiving_data};
 ReceivingState state = waiting;
 
 WiFiServer server(COMMAND_PORT);
+WiFiUDP udp;
 
 uint16_t receiveLength;
 uint8_t receiveBuffer[2048];
-int pixelcount = 41;
+int pixelcount = 50;
 
 Adafruit_NeoPixel pixels = Adafruit_NeoPixel(pixelcount, D5, NEO_GRB + NEO_KHZ800);
 
 void setup(void) {
+
+
   // Serial Port
   Serial.begin(9600);
 
@@ -53,20 +60,54 @@ void setup(void) {
 
   // Server
   server.begin();
+
+  pinMode(D8, INPUT);
+  attachInterrupt(digitalPinToInterrupt(D8), sendDiscoverMessage, FALLING);
+
+  // Connection LED 2
+  pinMode(D7, OUTPUT);
+  digitalWrite(D7, LOW);
+
+  // Data LED 1
+  pinMode(D6, OUTPUT);
+  digitalWrite(D6, LOW);
+}
+
+void sendDiscoverMessage() {
+  udp.begin(1234);
+  udp.beginPacketMulticast  (IPAddress(239, 1, 3, 37), 1337, WiFi.localIP());
+  udp.write(ID);
+  udp.write(" ");
+  char cstr[16];
+  itoa(COMMAND_PORT, cstr, 10);
+  udp.write(cstr);
+  udp.write(" blnk protocol discovery");
+  udp.endPacket();
+  udp.stop();
 }
 
 void loop() {
+  sendDiscoverMessage();
+
+  delay(1000);
+
   WiFiClient client = server.available();
   if (client)
   {
-    Serial.println("Client connected");
+    digitalWrite(D7, HIGH);
+    printDebug("Client connected");
     while (client.connected())
     {
       while (client.available() > 0)
       {
+        digitalWrite(D6, HIGH);
+        printDebug("Data! yay!");
         switch (state) {
           case waiting:
             if (client.read() == 0xaf) {
+#ifdef DEBUG_ALL_DATA
+              Serial.println("Got startbyte.");
+#endif
               state = waiting_l1;
             }
             break;
@@ -76,6 +117,10 @@ void loop() {
             break;
           case waiting_l2:
             receiveLength |= client.read();
+#ifdef DEBUG_ALL_DATA
+            Serial.print("Got length: ");
+            Serial.println(receiveLength);
+#endif
             state = receiving_data;
             break;
           case receiving_data:
@@ -92,28 +137,37 @@ void loop() {
             break;
         }
       }
+      digitalWrite(D6, LOW);
     }
-    Serial.println("Client disconnected");
+    digitalWrite(D7, LOW);
+    printDebug("Client disconnected");
   }
 }
 
 void handleMessage() {
-  Serial.println("Handling");
+  printDebug("Handling");
   if (receiveBuffer[0] == 2) {
     // Command 2 = interval
-    Serial.println("Interval packet");
+    printDebug("Interval packet");
 
     pixels.show();
   } else if (receiveBuffer[0] == 1) {
     // Command 1 = frame
-    Serial.println("Frame packet");
+    printDebug("Frame packet");
     for (int i = 0; i < receiveLength && i < 3 * pixelcount; i++) {
       pixels.setPixelColor(i, pixels.Color(receiveBuffer[3 * i + 1], receiveBuffer[3 * i + 2], receiveBuffer[3 * i + 3]));
     }
     pixels.show();
   } else if (receiveBuffer[0] == 0) {
     // Command 0 = discard
-    Serial.println("Discard Packet");
+    printDebug("Discard Packet");
   }
-  Serial.println("Done");
+  printDebug("Done");
 }
+
+void printDebug(String s) {
+#ifdef DEBUG
+  Serial.println(s);
+#endif
+}
+
